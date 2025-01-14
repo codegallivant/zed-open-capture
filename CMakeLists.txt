@@ -234,6 +234,39 @@ if(BUILD_EXAMPLES)
             )
         endif()
 
+        ##### Depth Socket Example
+        include(FindPkgConfig)
+        pkg_check_modules(ZMQ REQUIRED libzmq)
+        find_package(msgpack REQUIRED)
+        find_package(OpenMP)
+
+        set(DEPTH_SOCKET ${PROJECT_NAME}_depth_socket)
+        include_directories( ${PROJECT_SOURCE_DIR}/examples/include)
+        add_executable(${DEPTH_SOCKET} "${PROJECT_SOURCE_DIR}/examples/zed_transfer.cpp")
+        set_target_properties(${DEPTH_SOCKET} PROPERTIES PREFIX "")
+        target_include_directories(${DEPTH_SOCKET} PRIVATE
+        ${ZMQ_INCLUDE_DIRS}
+        ${msgpack_INCLUDE_DIRS}
+        )
+        if(OpenMP_CXX_FOUND)
+            include_directories(${OpenMP_CXX_INCLUDE_DIRS})
+            SET(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+            target_link_libraries(${DEPTH_SOCKET}
+              OpenMP::OpenMP_CXX
+              ${PROJECT_NAME}
+              ${OpenCV_LIBS}
+              ${ZMQ_LIBRARIES}
+              ${msgpack_LIBS}
+            )
+        else()
+            target_link_libraries(${DEPTH_SOCKET}
+              ${PROJECT_NAME}
+              ${OpenCV_LIBS}
+              ${ZMQ_LIBRARIES}
+              ${msgpack_LIBS}
+            )
+        endif()
+
         ##### Depth Tune Stereo
         set(STEREO_TUNE_APP ${PROJECT_NAME}_depth_tune_stereo)
         include_directories( ${PROJECT_SOURCE_DIR}/examples/include)
