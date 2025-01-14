@@ -28,7 +28,7 @@
 // OpenCV includes
 #include <opencv2/opencv.hpp>
 
-//#undef HAVE_OPENCV_VIZ // Uncomment if cannot use Viz3D for point cloud rendering
+#undef HAVE_OPENCV_VIZ // Uncomment if cannot use Viz3D for point cloud rendering
 
 #ifdef HAVE_OPENCV_VIZ
 #include <opencv2/viz.hpp>
