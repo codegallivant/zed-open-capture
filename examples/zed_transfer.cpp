@@ -74,104 +74,75 @@ struct Image {
   MSGPACK_DEFINE(matrix, rows, cols, type);
 };
 
-CameraInfo parse_camera_config(const std::string& filepath, const std::string& camera_section) {
-    std::ifstream file(filepath);
-    if (!file.is_open()) {
-        throw std::runtime_error("Cannot open file: " + filepath);
-    }
-
+CameraInfo readCameraInfo(const std::string& config_file, const std::string& camera_section) {
+    // CameraInfo message to populate
     CameraInfo camera_info;
-    std::string line;
-    std::string current_section;
-    bool found_section = false;
-    double fx = 0, fy = 0, cx = 0, cy = 0;
 
-    // Set resolution based on camera section
-    if (camera_section.find("2K") != std::string::npos) {
-        camera_info.width = 2208;
-        camera_info.height = 1242;
-    } else if (camera_section.find("FHD") != std::string::npos) {
-        camera_info.width = 1920;
-        camera_info.height = 1080;
-    } else if (camera_section.find("HD") != std::string::npos) {
-        camera_info.width = 1280;
-        camera_info.height = 720;
-    } else if (camera_section.find("VGA") != std::string::npos) {
-        camera_info.width = 672;
-        camera_info.height = 376;
+    // Open the configuration file
+    std::ifstream file(config_file);
+    if (!file.is_open()) {
+        throw std::runtime_error("Unable to open file: " + config_file);
     }
 
-    // Initialize matrices with zeros
-    camera_info.D.resize(5, 0.0);  // k1, k2, p1, p2, k3
-    std::fill(camera_info.K.begin(), camera_info.K.end(), 0.0);
-    std::fill(camera_info.R.begin(), camera_info.R.end(), 0.0);
-    std::fill(camera_info.P.begin(), camera_info.P.end(), 0.0);
-
-    // Set R to identity matrix
-    camera_info.R[0] = 1.0;
-    camera_info.R[4] = 1.0;
-    camera_info.R[8] = 1.0;
-
+    // Parse the file
+    std::string line, current_section;
+    std::map<std::string, double> params;
     while (std::getline(file, line)) {
-        line.erase(0, line.find_first_not_of(" \t\r\n"));
-        line.erase(line.find_last_not_of(" \t\r\n") + 1);
-        if (line.empty()) continue;
+        // Skip empty lines or comments
+        if (line.empty() || line[0] == '#') continue;
 
+        // Detect section headers
         if (line[0] == '[' && line.back() == ']') {
-            current_section = line.substr(1, line.size() - 2);
-            if (current_section == camera_section) {
-                found_section = true;
-            } else if (found_section) {
-                break;
-            }
+            current_section = line.substr(1, line.size() - 2); // Extract section name
             continue;
         }
 
-        if (!found_section) continue;
-
-        size_t delimiter_pos = line.find('=');
-        if (delimiter_pos == std::string::npos) continue;
-
-        std::string key = line.substr(0, delimiter_pos);
-        std::string value = line.substr(delimiter_pos + 1);
-        double val = std::stod(value);
-
-        if (key == "fx") {
-            fx = val;
-        } else if (key == "fy") {
-            fy = val;
-        } else if (key == "cx") {
-            cx = val;
-        } else if (key == "cy") {
-            cy = val;
-        } else if (key == "k1") {
-            camera_info.D[0] = val;
-        } else if (key == "k2") {
-            camera_info.D[1] = val;
-        } else if (key == "p1") {
-            camera_info.D[2] = val;
-        } else if (key == "p2") {
-            camera_info.D[3] = val;
-        } else if (key == "k3") {
-            camera_info.D[4] = val;
+        // Parse key-value pairs within the relevant section
+        if (current_section == camera_section) {
+            std::istringstream line_stream(line);
+            std::string key;
+            double value;
+            if (std::getline(line_stream, key, '=') && line_stream >> value) {
+                params[key] = value;
+            }
         }
     }
 
-    // Fill K matrix (camera intrinsics)
-    camera_info.K[0] = fx;    // fx
-    camera_info.K[2] = cx;    // cx
-    camera_info.K[4] = fy;    // fy
-    camera_info.K[5] = cy;    // cy
-    camera_info.K[8] = 1.0;   // scale
+    file.close();
 
-    // Fill P matrix (projection matrix = K * [R|t])
-    camera_info.P[0] = fx;    // fx
-    camera_info.P[2] = cx;    // cx
-    camera_info.P[5] = fy;    // fy
-    camera_info.P[6] = cy;    // cy
-    camera_info.P[10] = 1.0;  // scale
+    // Check if required parameters are present
+    if (params.empty()) {
+        throw std::runtime_error("No parameters found for section: " + camera_section);
+    }
 
+    // Populate CameraInfo message
+    camera_info.width = 1280;  // HD720 width
+    camera_info.height = 720;  // HD720 height
+
+    // Camera matrix (K)
+    camera_info.K = {
+        params["fx"], 0.0,         params["cx"],
+        0.0,         params["fy"], params["cy"],
+        0.0,         0.0,         1.0
+    };
+
+    // Distortion coefficients (D)
+    camera_info.D = {params["k1"], params["k2"], params["p1"], params["p2"], params["k3"]};
+
+    // Distortion model
     camera_info.distortion_model = "plumb_bob";
+
+    // Rectification matrix (R), identity for rectified images
+    camera_info.R = {1.0, 0.0, 0.0,
+                     0.0, 1.0, 0.0,
+                     0.0, 0.0, 1.0};
+
+    // Projection matrix (P)
+    camera_info.P = {
+        params["fx"], 0.0,         params["cx"], 0.0,
+        0.0,         params["fy"], params["cy"], 0.0,
+        0.0,         0.0,         1.0,          0.0
+    };
 
     return camera_info;
 }
@@ -184,6 +155,10 @@ int main(int argc, char *argv[])
     (void)argc;
     (void)argv;
     // <---- Silence unused warning
+
+// Read camera info
+CameraInfo camera_info = readCameraInfo("/home/cdgr/zed/settings/SN33587609.conf", "LEFT_CAM_HD");
+//
 
 // Socket
     zmq::context_t context(1);
@@ -422,12 +397,23 @@ int main(int argc, char *argv[])
             float* depth_vec = (float*)(&(depth_map_cpu.data[0]));
 
 #ifdef SOCKET_PUB
-    cv::Mat img = depth_map_cpu;
+    double minVal, maxVal;
+    cv::minMaxLoc(left_depth_map, &minVal, &maxVal);
+    std::cout << "Depth range: " << minVal << " to " << maxVal << " mm" << std::endl;
     Image img_data;
-    img_data.matrix = std::vector<uchar>(img.data, img.data + (img.rows * img.cols * img.channels()));
-    img_data.rows = img.rows;
-    img_data.cols = img.cols;
-    img_data.type = img.type();
+    size_t data_size = left_depth_map.rows * left_depth_map.cols * sizeof(float);
+    img_data.matrix.resize(data_size);
+    std::memcpy(img_data.matrix.data(), left_depth_map.data, data_size);
+    img_data.rows = left_depth_map.rows;
+    img_data.cols = left_depth_map.cols;
+    img_data.type = left_depth_map.type();
+    cv::Mat depth_8bit;
+    cv::normalize(left_depth_map, depth_8bit, 0, 255, cv::NORM_MINMAX, CV_8UC1);
+    // Apply color map
+    cv::Mat colored_depth;
+    cv::applyColorMap(depth_8bit, colored_depth, cv::COLORMAP_JET);
+    cv::imshow("Depth", colored_depth);
+    if (cv::waitKey(1) == 'q') break;
 
     /* packed/serialize the data using msgpack */
     msgpack::sbuffer serialized_img;
@@ -435,8 +421,6 @@ int main(int argc, char *argv[])
 
     zmq::message_t packed_msg(serialized_img.size());
     std::memcpy(packed_msg.data(), serialized_img.data(), serialized_img.size());
-
-    CameraInfo camera_info = parse_camera_config("/home/cdgr/zed/settings/SN33587609.conf", "RIGHT_CAM_HD");
 
     // Serialize CameraInfo
     nlohmann::json j = camera_info;
@@ -447,7 +431,7 @@ int main(int argc, char *argv[])
 
     depth_socket.send(packed_msg, zmq::send_flags::none);
     camera_info_socket.send(camera_info_msg, zmq::send_flags::none);
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    std::this_thread::sleep_for(std::chrono::milliseconds(2000));
 #endif
 
 #pragma omp parallel for

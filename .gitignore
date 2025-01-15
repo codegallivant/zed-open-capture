@@ -56,3 +56,5 @@ compile_commands.json
 
 # Documentation
 doc/html/
+
+.vscode/
