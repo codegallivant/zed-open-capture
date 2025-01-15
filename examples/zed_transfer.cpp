@@ -23,11 +23,14 @@
 #include <sstream>
 #include <string>
 
+
 #include <zmq.hpp>
 #include <zmq_addon.hpp>
-
 #include <msgpack.hpp>
-
+#include <fstream>
+#include <map>
+#include <nlohmann/json.hpp>
+#include <array>
 
 #include "videocapture.hpp"
 
@@ -52,6 +55,17 @@
 #define USE_HALF_SIZE_DISP // Comment to compute depth matching on full image frames
 #define SOCKET_PUB
 
+typedef struct CameraInfo {
+    int height;
+    int width;
+    std::string distortion_model;
+    std::vector<double> D;
+    std::array<double, 9> K;
+    std::array<double, 9> R;
+    std::array<double, 12> P;
+    NLOHMANN_DEFINE_TYPE_INTRUSIVE(CameraInfo, height, width, distortion_model, D, K, R, P);
+} CameraInfo;
+
 struct Image {
   std::vector<uchar> matrix;
   int rows = 0;
@@ -59,6 +73,108 @@ struct Image {
   int type = 0;
   MSGPACK_DEFINE(matrix, rows, cols, type);
 };
+
+CameraInfo parse_camera_config(const std::string& filepath, const std::string& camera_section) {
+    std::ifstream file(filepath);
+    if (!file.is_open()) {
+        throw std::runtime_error("Cannot open file: " + filepath);
+    }
+
+    CameraInfo camera_info;
+    std::string line;
+    std::string current_section;
+    bool found_section = false;
+    double fx = 0, fy = 0, cx = 0, cy = 0;
+
+    // Set resolution based on camera section
+    if (camera_section.find("2K") != std::string::npos) {
+        camera_info.width = 2208;
+        camera_info.height = 1242;
+    } else if (camera_section.find("FHD") != std::string::npos) {
+        camera_info.width = 1920;
+        camera_info.height = 1080;
+    } else if (camera_section.find("HD") != std::string::npos) {
+        camera_info.width = 1280;
+        camera_info.height = 720;
+    } else if (camera_section.find("VGA") != std::string::npos) {
+        camera_info.width = 672;
+        camera_info.height = 376;
+    }
+
+    // Initialize matrices with zeros
+    camera_info.D.resize(5, 0.0);  // k1, k2, p1, p2, k3
+    std::fill(camera_info.K.begin(), camera_info.K.end(), 0.0);
+    std::fill(camera_info.R.begin(), camera_info.R.end(), 0.0);
+    std::fill(camera_info.P.begin(), camera_info.P.end(), 0.0);
+
+    // Set R to identity matrix
+    camera_info.R[0] = 1.0;
+    camera_info.R[4] = 1.0;
+    camera_info.R[8] = 1.0;
+
+    while (std::getline(file, line)) {
+        line.erase(0, line.find_first_not_of(" \t\r\n"));
+        line.erase(line.find_last_not_of(" \t\r\n") + 1);
+        if (line.empty()) continue;
+
+        if (line[0] == '[' && line.back() == ']') {
+            current_section = line.substr(1, line.size() - 2);
+            if (current_section == camera_section) {
+                found_section = true;
+            } else if (found_section) {
+                break;
+            }
+            continue;
+        }
+
+        if (!found_section) continue;
+
+        size_t delimiter_pos = line.find('=');
+        if (delimiter_pos == std::string::npos) continue;
+
+        std::string key = line.substr(0, delimiter_pos);
+        std::string value = line.substr(delimiter_pos + 1);
+        double val = std::stod(value);
+
+        if (key == "fx") {
+            fx = val;
+        } else if (key == "fy") {
+            fy = val;
+        } else if (key == "cx") {
+            cx = val;
+        } else if (key == "cy") {
+            cy = val;
+        } else if (key == "k1") {
+            camera_info.D[0] = val;
+        } else if (key == "k2") {
+            camera_info.D[1] = val;
+        } else if (key == "p1") {
+            camera_info.D[2] = val;
+        } else if (key == "p2") {
+            camera_info.D[3] = val;
+        } else if (key == "k3") {
+            camera_info.D[4] = val;
+        }
+    }
+
+    // Fill K matrix (camera intrinsics)
+    camera_info.K[0] = fx;    // fx
+    camera_info.K[2] = cx;    // cx
+    camera_info.K[4] = fy;    // fy
+    camera_info.K[5] = cy;    // cy
+    camera_info.K[8] = 1.0;   // scale
+
+    // Fill P matrix (projection matrix = K * [R|t])
+    camera_info.P[0] = fx;    // fx
+    camera_info.P[2] = cx;    // cx
+    camera_info.P[5] = fy;    // fy
+    camera_info.P[6] = cy;    // cy
+    camera_info.P[10] = 1.0;  // scale
+
+    camera_info.distortion_model = "plumb_bob";
+
+    return camera_info;
+}
 
 
 
@@ -72,7 +188,9 @@ int main(int argc, char *argv[])
 // Socket
     zmq::context_t context(1);
     zmq::socket_t depth_socket(context, ZMQ_PUB);
+    zmq::socket_t camera_info_socket(context, ZMQ_PUB);
     depth_socket.bind("tcp://*:"+std::to_string(5555));
+    camera_info_socket.bind("tcp://*:"+std::to_string(5556));
 // End Socket
 
 
@@ -317,7 +435,19 @@ int main(int argc, char *argv[])
 
     zmq::message_t packed_msg(serialized_img.size());
     std::memcpy(packed_msg.data(), serialized_img.data(), serialized_img.size());
+
+    CameraInfo camera_info = parse_camera_config("/home/cdgr/zed/settings/SN33587609.conf", "RIGHT_CAM_HD");
+
+    // Serialize CameraInfo
+    nlohmann::json j = camera_info;
+    std::string serialized = j.dump();
+
+    zmq::message_t camera_info_msg(serialized.size());
+    memcpy(camera_info_msg.data(), serialized.data(), serialized.size());
+
     depth_socket.send(packed_msg, zmq::send_flags::none);
+    camera_info_socket.send(camera_info_msg, zmq::send_flags::none);
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
 #endif
 
 #pragma omp parallel for
