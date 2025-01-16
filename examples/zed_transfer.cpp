@@ -364,8 +364,8 @@ CameraInfo camera_info = readCameraInfo("/home/cdgr/zed/settings/SN33587609.conf
             // <---- Stereo matching
 
             // ----> Show frames
-            sl_oc::tools::showImage("Right rect.", right_rect, params.res,true, remapElabInfo.str());
-            sl_oc::tools::showImage("Left rect.", left_rect, params.res,true, remapElabInfo.str());
+            // sl_oc::tools::showImage("Right rect.", right_rect, params.res,true, remapElabInfo.str());
+            // sl_oc::tools::showImage("Left rect.", left_rect, params.res,true, remapElabInfo.str());
             // <---- Show frames
 
             // ----> Show disparity image
@@ -374,7 +374,7 @@ CameraInfo camera_info = readCameraInfo("/home/cdgr/zed/settings/SN33587609.conf
 
             cv::applyColorMap(left_disp_image,left_disp_image,cv::COLORMAP_JET); // COLORMAP_INFERNO is better, but it's only available starting from OpenCV v4.1.0
 
-            sl_oc::tools::showImage("Disparity", left_disp_image, params.res,true, stereoElabInfo.str());
+            // sl_oc::tools::showImage("Disparity", left_disp_image, params.res,true, stereoElabInfo.str());
             // <---- Show disparity image
 
             // ----> Extract Depth map
@@ -407,13 +407,13 @@ CameraInfo camera_info = readCameraInfo("/home/cdgr/zed/settings/SN33587609.conf
     img_data.rows = left_depth_map.rows;
     img_data.cols = left_depth_map.cols;
     img_data.type = left_depth_map.type();
-    cv::Mat depth_8bit;
-    cv::normalize(left_depth_map, depth_8bit, 0, 255, cv::NORM_MINMAX, CV_8UC1);
-    // Apply color map
-    cv::Mat colored_depth;
-    cv::applyColorMap(depth_8bit, colored_depth, cv::COLORMAP_JET);
-    cv::imshow("Depth", colored_depth);
-    if (cv::waitKey(1) == 'q') break;
+    // cv::Mat depth_8bit;
+    // cv::normalize(left_depth_map, depth_8bit, 0, 255, cv::NORM_MINMAX, CV_8UC1);
+    // // Apply color map
+    // cv::Mat colored_depth;
+    // cv::applyColorMap(depth_8bit, colored_depth, cv::COLORMAP_JET);
+    // cv::imshow("Depth", colored_depth);
+    // if (cv::waitKey(1) == 'q') break;
 
     /* packed/serialize the data using msgpack */
     msgpack::sbuffer serialized_img;
@@ -431,7 +431,7 @@ CameraInfo camera_info = readCameraInfo("/home/cdgr/zed/settings/SN33587609.conf
 
     depth_socket.send(packed_msg, zmq::send_flags::none);
     camera_info_socket.send(camera_info_msg, zmq::send_flags::none);
-    std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+    std::this_thread::sleep_for(std::chrono::milliseconds(400));
 #endif
 
 #pragma omp parallel for
