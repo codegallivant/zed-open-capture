@@ -431,7 +431,7 @@ CameraInfo camera_info = readCameraInfo("/home/cdgr/zed/settings/SN33587609.conf
 
     depth_socket.send(packed_msg, zmq::send_flags::none);
     camera_info_socket.send(camera_info_msg, zmq::send_flags::none);
-    std::this_thread::sleep_for(std::chrono::milliseconds(400));
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
 #endif
 
 #pragma omp parallel for
